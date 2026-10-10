@@ -40,11 +40,11 @@ pnpm run test
 
 ## 手机安装与免扫码授权
 
-本项目为私人仓库：[caishengwei/csw-vault-sync](https://github.com/caishengwei/csw-vault-sync)。不需要提交到公开社区目录。
+本项目为公开仓库：[caishengwei/csw-vault-sync](https://github.com/caishengwei/csw-vault-sync)。通过 BRAT 安装和更新，无需配置私仓 Token。
 
 1. 在手机 Obsidian 的社区插件中安装并启用 [BRAT](https://github.com/TfTHacker/obsidian42-brat)。
-2. 在 GitHub 创建仅限本仓库的 Fine-grained Token，`Contents` 设置为 `Read-only`，将 Token 填入手机 BRAT 的私仓凭据设置。参见 [BRAT 私仓说明](https://tfthacker.com/brat-private-repo)。
-3. 在 BRAT 添加仓库 `caishengwei/csw-vault-sync`，安装最新 Release，再启用 **Vault Sync**。
+2. 在 BRAT 添加仓库 `caishengwei/csw-vault-sync`，安装最新 Release，再启用 **Vault Sync**。
+3. 已安装时，在 BRAT 检查 beta 插件更新，将 **Vault Sync** 更新到最新版本。
 4. 电脑端先完成登录并保存同步目录，点击「导出到手机」，设置至少 8 位密码并生成授权码。
 5. 把加密授权码传到手机，在手机 Vault Sync 中点击「导入电脑授权」，粘贴授权码并输入同一密码。导入前验证账号和目录，成功后可先预览同步。
 
