@@ -12,7 +12,13 @@ import { LocalFileStore } from './local'
 import { exclusionMatcher, META_DIR } from './paths'
 import { QuarkFileStore } from './quark'
 import { acquireLock, DiskState } from './state'
-import { checkAbort, HttpTransport, safeError, SyncError } from './types'
+import {
+	checkAbort,
+	HttpTransport,
+	safeError,
+	SyncError,
+	SyncActivity,
+} from './types'
 
 export const nodeTransport: HttpTransport = async (request) => {
 	checkAbort(request.signal)
@@ -73,6 +79,7 @@ export interface RuntimeOptions {
 	signal?: AbortSignal
 	allowDeletes?: boolean
 	onProgress?: (completed: number, total: number) => void
+	onActivity?: (activity: SyncActivity) => void
 }
 
 export async function runQuark(
@@ -117,6 +124,7 @@ export async function runQuark(
 			checkpoint: (value) => disk.save(value),
 			signal: options.signal,
 			onProgress: options.onProgress,
+			onActivity: options.onActivity,
 		})
 		if (mode === 'preview') return publicPlan(await engine.preview())
 		await atomicWrite(

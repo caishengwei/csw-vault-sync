@@ -8,6 +8,7 @@ import { acquireLock } from './state'
 import { MockQuark } from './test-support'
 import { QuarkFileStore } from './quark'
 import { sha256 } from './local'
+import { SyncActivity } from './types'
 
 describe('shared sync with real isolated filesystem and simulated Quark API', () => {
 	let vault: string
@@ -41,6 +42,42 @@ describe('shared sync with real isolated filesystem and simulated Quark API', ()
 		const second = await sync()
 		expect('completed' in second && second.completed).toBe(0)
 		expect('unchanged' in second && second.unchanged).toBeGreaterThanOrEqual(2)
+	})
+
+	it('reports scanning, comparison and the active file before its transfer finishes', async () => {
+		await write('local.md', 'local note')
+		const activity: SyncActivity[] = []
+		const completed: number[] = []
+		await runQuark(vault, 'sync', {
+			transport: async (request) => {
+				if (request.url.includes('/file/sort?') && server.requests.length === 0)
+					expect(activity.at(-1)?.phase).toBe('scan')
+				if (request.url.includes('/upload/pre?')) {
+					expect(activity.at(-1)).toMatchObject({
+						phase: 'sync',
+						completed: 0,
+						total: 1,
+						path: 'local.md',
+						action: 'push',
+					})
+					expect(completed).toEqual([])
+				}
+				return server.transport(request)
+			},
+			onActivity: (value) => activity.push(value),
+			onProgress: (count) => completed.push(count),
+		})
+		expect(
+			activity.some(
+				(value) => value.phase === 'compare' && value.path === 'local.md',
+			),
+		).toBe(true)
+		expect(activity.at(-1)).toMatchObject({
+			phase: 'sync',
+			completed: 1,
+			total: 1,
+		})
+		expect(completed).toEqual([1])
 	})
 
 	it('preview reads metadata/content but never changes local notes or remote files', async () => {

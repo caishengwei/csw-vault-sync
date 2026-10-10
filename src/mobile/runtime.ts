@@ -16,6 +16,7 @@ import {
 	SyncConfig,
 	SyncError,
 	SyncResult,
+	SyncActivity,
 } from '../headless/types'
 import {
 	ensureDirectory,
@@ -29,6 +30,7 @@ export interface VaultRuntimeOptions {
 	signal?: AbortSignal
 	allowDeletes?: boolean
 	onProgress?: (completed: number, total: number) => void
+	onActivity?: (activity: SyncActivity) => void
 }
 
 export interface VaultStatus {
@@ -192,6 +194,7 @@ export class MobileVaultContext {
 					writeMetadata(this.adapter, statePath, serializeState(value)),
 				signal: options.signal,
 				onProgress: options.onProgress,
+				onActivity: options.onActivity,
 			})
 			if (mode === 'preview') return publicPlan(await engine.preview())
 			checkAbort(options.signal)

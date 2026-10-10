@@ -34,6 +34,8 @@ pnpm run test
 
 获取同步目录 ID：在夸克网页版创建并打开专用文件夹，从地址栏取最后一级文件夹对应的 ID。例如 `…/abc123-Obsidian` 只填写 `abc123`，去掉后面的 `-文件夹名`，不要填写整个网址。填入插件后点击「保存夸克配置」。
 
+手机手动同步会立即打开进度窗口，显示扫描、文件对比、当前文件、同步数量和最终结果。可隐藏窗口继续同步，再从设置中的「查看同步进度」或命令面板重新打开；取消时会先显示等待当前请求结束，结束后才释放同步锁。自动同步不弹出进度窗口。
+
 新安装默认关闭自动同步；插件设置中的定时与保存后同步只在 Obsidian 打开时运行。开发记忆写入不会调用任何同步入口。
 
 ## 手机安装与免扫码授权
@@ -112,7 +114,7 @@ node dist/vault-sync.cjs status --vault "/path/to/vault"
 
 ## 夸克接入限制
 
-夸克适配依赖非官方 Cookie 接口，Cookie 失效需要更新，接口变化可能需要维护；参考 [OpenList 夸克驱动文档](https://doc.oplist.org/guide/drivers/quark) 和 [实现](https://github.com/OpenListTeam/OpenList/tree/main/drivers/quark_uc)。桌面真实账号扫码、连接及临时文件的上传、覆盖、下载、回收已验证；130 项自动化测试覆盖模拟夸克 API、隔离文件系统、完整插件的桌面与无 Node 移动环境、电脑授权导入手机和实际 MCP 协议。移动端仍需在真实手机上验证平台网络与文件行为。
+夸克适配依赖非官方 Cookie 接口，Cookie 失效需要更新，接口变化可能需要维护；参考 [OpenList 夸克驱动文档](https://doc.oplist.org/guide/drivers/quark) 和 [实现](https://github.com/OpenListTeam/OpenList/tree/main/drivers/quark_uc)。桌面真实账号扫码、连接及临时文件的上传、覆盖、下载、回收已验证；131 项自动化测试覆盖模拟夸克 API、隔离文件系统、完整插件的桌面与无 Node 移动环境、电脑授权导入手机和实际 MCP 协议。移动端仍需在真实手机上验证平台网络与文件行为。
 
 ## 致谢与许可证
 

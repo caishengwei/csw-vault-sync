@@ -29,27 +29,44 @@ describe('compiled desktop plugin', () => {
 					change?: (value: string) => void
 					element?: { value: string }
 				}
-				buttons: Array<{ label: string; click?: () => Promise<void> }>
+				buttons: Array<{
+					label: string
+					disabled: boolean
+					click?: () => Promise<void>
+				}>
 			}> = []
 			const nodeRequire = createRequire(resolve('package.json'))
 			const loginImages: Array<{ src?: string; alt?: string }> = []
 			const modalMessages: string[] = []
 			const notices: string[] = []
-			const modals: Array<{ close: () => void }> = []
+			const modals: Array<{ close: () => void; contentEl: Element }> = []
 			class Element {
+				tag = 'div'
+				textContent = ''
+				children: Element[] = []
+				max = 1
+				value = 0
 				classList = { add() {}, remove() {} }
 				createDiv() {
-					return new Element()
+					return this.createEl('div')
 				}
 				createEl(
 					tag: string,
-					options?: { attr?: { src?: string; alt?: string } },
+					options?: { text?: string; attr?: { src?: string; alt?: string } },
 				) {
 					if (tag === 'img') loginImages.push(options?.attr || {})
-					return new Element()
+					const element = new Element()
+					element.tag = tag
+					element.textContent = options?.text || ''
+					this.children.push(element)
+					return element
 				}
-				empty() {}
+				empty() {
+					this.children = []
+					this.textContent = ''
+				}
 				setText(text: string) {
+					this.textContent = text
 					modalMessages.push(text)
 				}
 				setAttr() {}
@@ -60,7 +77,11 @@ describe('compiled desktop plugin', () => {
 			class Setting {
 				row = {
 					name: '',
-					buttons: [] as Array<{ label: string; click?: () => Promise<void> }>,
+					buttons: [] as Array<{
+						label: string
+						disabled: boolean
+						click?: () => Promise<void>
+					}>,
 					input: undefined as
 						| { change?: (value: string) => void; element?: { value: string } }
 						| undefined,
@@ -115,6 +136,7 @@ describe('compiled desktop plugin', () => {
 				addButton(callback: (control: unknown) => void) {
 					const button = {
 						label: '',
+						disabled: false,
 						click: undefined as (() => Promise<void>) | undefined,
 					}
 					this.row.buttons.push(button)
@@ -124,7 +146,10 @@ describe('compiled desktop plugin', () => {
 							return control
 						},
 						setCta: () => control,
-						setDisabled: () => control,
+						setDisabled: (disabled: boolean) => {
+							button.disabled = disabled
+							return control
+						},
 						onClick: (click: () => Promise<void>) => {
 							button.click = click
 							return control
@@ -180,6 +205,7 @@ describe('compiled desktop plugin', () => {
 					this.onClose()
 				}
 			}
+			let beforeRequest: ((url: string) => Promise<void>) | undefined
 			const obsidian = {
 				Plugin,
 				PluginSettingTab,
@@ -211,6 +237,7 @@ describe('compiled desktop plugin', () => {
 					headers?: Record<string, string>
 					body?: string | ArrayBuffer
 				}) => {
+					await beforeRequest?.(request.url)
 					if (request.url.includes('getTokenForQrcodeLogin')) {
 						const bytes = new TextEncoder().encode(
 							JSON.stringify({
@@ -264,7 +291,10 @@ describe('compiled desktop plugin', () => {
 						syncExecutorService: {
 							executeSync: (options: { mode: string }) => Promise<boolean>
 						}
-						quarkSyncService: { execute: (manual: boolean) => Promise<boolean> }
+						quarkSyncService: {
+							execute: (manual: boolean) => Promise<boolean>
+							showStatus: () => Promise<void>
+						}
 					}
 				},
 			}
@@ -389,13 +419,127 @@ describe('compiled desktop plugin', () => {
 					).allowDeletes,
 				).toBe(false)
 				await fs.writeFile(join(root, 'plugin.md'), 'from desktop plugin')
-				expect(await plugin.quarkSyncService.execute(true)).toBe(true)
+				const progressModal = () =>
+					modals
+						.filter((modal) =>
+							modal.contentEl.children.some(
+								(element) =>
+									element.tag === 'h2' &&
+									element.textContent === '夸克同步进度',
+							),
+						)
+						.at(-1)!
+				const progressText = (modal = progressModal()) =>
+					modal.contentEl.children
+						.map((element) => element.textContent)
+						.join('\n')
+				let releaseRequest!: () => void
+				let requestStarted!: () => void
+				const started = new Promise<void>((resolve) => {
+					requestStarted = resolve
+				})
+				const pending = new Promise<void>((resolve) => {
+					releaseRequest = resolve
+				})
+				let uploadStarted!: () => void
+				let releaseUpload!: () => void
+				const transferring = new Promise<void>((resolve) => {
+					uploadStarted = resolve
+				})
+				const uploadPending = new Promise<void>((resolve) => {
+					releaseUpload = resolve
+				})
+				beforeRequest = async (url) => {
+					if (url.includes('/file/sort?')) {
+						requestStarted()
+						await pending
+					}
+					if (url.includes('partNumber=')) {
+						uploadStarted()
+						await uploadPending
+					}
+				}
+				const firstSync = plugin.quarkSyncService.execute(true)
+				if (platform === 'mobile')
+					expect(progressText()).toContain('正在扫描本地和夸克目录')
+				else expect(progressModal()).toBeUndefined()
+				await started
+				await button('查看同步进度').click!()
+				expect(progressText()).toContain('正在扫描本地和夸克目录')
+				const hidden = progressModal()
+				await button('隐藏').click!()
+				expect(hidden.contentEl.children).toHaveLength(0)
+				await plugin.quarkSyncService.showStatus()
+				expect(progressModal()).not.toBe(hidden)
+				expect(progressText()).toContain('正在扫描本地和夸克目录')
+				releaseRequest()
+				await transferring
+				expect(progressText()).toContain('正在同步：0/1')
+				expect(progressText()).toContain('plugin.md')
+				releaseUpload()
+				beforeRequest = undefined
+				expect(await firstSync).toBe(true)
+				expect(progressText()).toContain('夸克同步结束：完成 1')
+				expect(button('取消同步').disabled).toBe(true)
+				expect(
+					progressModal().contentEl.children.find(
+						(element) => element.tag === 'progress',
+					)?.value,
+				).toBe(1)
+				await button('关闭').click!()
 				expect(new TextDecoder().decode(quark.get('plugin.md')!.bytes)).toBe(
 					'from desktop plugin',
 				)
 				expect(await fs.readdir(join(root, '.vault-sync'))).not.toContain(
 					'lock',
 				)
+				const cancelledStarted = new Promise<void>((resolve) => {
+					requestStarted = resolve
+				})
+				const cancelledPending = new Promise<void>((resolve) => {
+					releaseRequest = resolve
+				})
+				beforeRequest = async (url) => {
+					if (url.includes('/file/sort?')) {
+						requestStarted()
+						await cancelledPending
+					}
+				}
+				const cancelledSync = plugin.quarkSyncService.execute(true)
+				await cancelledStarted
+				await plugin.quarkSyncService.showStatus()
+				expect(progressText()).toContain('正在扫描')
+				expect(progressText()).not.toContain('完成 1')
+				await button('取消同步').click!()
+				expect(progressText()).toContain('正在取消同步')
+				expect(button('正在取消…').disabled).toBe(true)
+				expect(await fs.readdir(join(root, '.vault-sync'))).toContain('lock')
+				releaseRequest()
+				beforeRequest = undefined
+				expect(await cancelledSync).toBe(false)
+				expect(progressText()).toContain('同步已取消')
+				expect(await fs.readdir(join(root, '.vault-sync'))).not.toContain(
+					'lock',
+				)
+				await button('关闭').click!()
+				expect(await plugin.quarkSyncService.execute(true)).toBe(true)
+				if (platform === 'mobile') {
+					expect(progressText()).toContain('完成 0，未变化 1')
+					await button('关闭').click!()
+				}
+				const beforeAutomaticSync = modals.length
+				expect(await plugin.quarkSyncService.execute(false)).toBe(true)
+				expect(modals).toHaveLength(beforeAutomaticSync)
+				beforeRequest = async () => {
+					throw new Error('synthetic connection failure')
+				}
+				expect(await plugin.quarkSyncService.execute(true)).toBe(false)
+				if (platform === 'mobile') {
+					expect(progressText()).toContain('夸克连接失败')
+					expect(button('取消同步').disabled).toBe(true)
+					await button('关闭').click!()
+				}
+				beforeRequest = undefined
 				const config = JSON.parse(
 					await fs.readFile(join(root, '.vault-sync/config.json'), 'utf8'),
 				)

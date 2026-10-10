@@ -208,6 +208,14 @@ export default class QuarkAccountSettings extends BaseSettings {
 					.setButtonText('预览同步')
 					.onClick(() => this.plugin.quarkSyncService.preview()),
 			)
+		new Setting(this.containerEl)
+			.setName('同步进度')
+			.setDesc('查看扫描、文件对比和同步结果。隐藏进度窗口后，同步会继续。')
+			.addButton((button) =>
+				button
+					.setButtonText('查看同步进度')
+					.onClick(() => this.plugin.quarkSyncService.showStatus()),
+			)
 		new Setting(this.containerEl).setName('同步前确认').addToggle((toggle) =>
 			toggle
 				.setValue(this.plugin.settings.confirmBeforeSync)

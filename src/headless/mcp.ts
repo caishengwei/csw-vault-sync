@@ -18,7 +18,7 @@ function response(value: unknown, isError = false) {
 }
 
 export function createMcp(vault: string, options: RuntimeOptions = {}) {
-	const server = new McpServer({ name: 'vault-sync', version: '1.3.0' })
+	const server = new McpServer({ name: 'vault-sync', version: '1.3.1' })
 	let job:
 		| {
 				id: string

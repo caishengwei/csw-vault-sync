@@ -56,6 +56,14 @@ export interface SyncAction {
 	merged?: Uint8Array
 }
 
+export interface SyncActivity {
+	phase: 'scan' | 'compare' | 'sync'
+	completed: number
+	total?: number
+	path?: string
+	action?: ActionType
+}
+
 export interface SyncPlan {
 	actions: SyncAction[]
 	unchanged: number

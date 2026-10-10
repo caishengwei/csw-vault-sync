@@ -1,7 +1,12 @@
-import { Modal, Notice, requestUrl } from 'obsidian'
+import { Modal, Notice, Platform, requestUrl } from 'obsidian'
 import type AlipanSyncPlugin from '../index'
 import { QuarkLoginModal } from '../components/QuarkLoginModal'
 import { QuarkAuthorizationModal } from '../components/QuarkAuthorizationModal'
+import {
+	QuarkProgressModal,
+	QuarkProgressState,
+	quarkProgressText,
+} from '../components/QuarkProgressModal'
 import { onCancelSync } from '../events'
 import { vaultSyncContext, VaultRunResult } from './vault-sync-context'
 import {
@@ -91,11 +96,44 @@ export class QuarkSyncService {
 	private controller?: AbortController
 	private loginModal?: QuarkLoginModal
 	private authorizationModal?: QuarkAuthorizationModal
-	private cancelSubscription = onCancelSync().subscribe(() =>
-		this.controller?.abort(),
-	)
-	private progress?: { completed: number; total: number }
+	private progressModal?: QuarkProgressModal
+	private progressState?: QuarkProgressState
+	private cancelSubscription = onCancelSync().subscribe(() => this.cancelSync())
 	constructor(private plugin: AlipanSyncPlugin) {}
+
+	private cancelSync() {
+		if (!this.controller || this.controller.signal.aborted) return
+		this.controller.abort()
+		if (this.progressState) this.progressState.cancelling = true
+		this.updateProgress()
+	}
+
+	private updateProgress() {
+		if (this.progressState)
+			this.plugin.statusService.updateSyncStatus({
+				text: quarkProgressText(this.progressState),
+			})
+		this.progressModal?.update()
+	}
+
+	private showProgress() {
+		if (!this.progressState) return
+		if (this.progressModal) {
+			this.progressModal.update()
+			return
+		}
+		const state = this.progressState
+		const modal = new QuarkProgressModal(
+			this.plugin.app,
+			() => state,
+			() => this.cancelSync(),
+			() => {
+				if (this.progressModal === modal) this.progressModal = undefined
+			},
+		)
+		this.progressModal = modal
+		modal.open()
+	}
 
 	authorization(mode: 'export' | 'import', onImported: () => Promise<void>) {
 		this.loginModal?.close()
@@ -133,23 +171,32 @@ export class QuarkSyncService {
 
 	async execute(manual: boolean) {
 		if (this.plugin.isSyncing) return false
+		this.progressModal?.close()
 		this.controller = new AbortController()
+		const state: QuarkProgressState = {
+			running: true,
+			cancelling: false,
+			startedAt: Date.now(),
+		}
+		this.progressState = state
 		this.plugin.toggleSyncUI(true)
-		this.plugin.statusService.updateSyncStatus({ text: '夸克同步：准备中' })
+		this.updateProgress()
 		try {
+			if (manual && !Platform.isDesktopApp) this.showProgress()
 			const context = await vaultSyncContext(this.plugin.app)
 			const result = await context.run('sync', {
 				transport: obsidianTransport,
 				signal: this.controller.signal,
-				onProgress: (completed, total) => {
-					this.progress = { completed, total }
-					this.plugin.statusService.updateSyncStatus({
-						text: `夸克同步：${completed}/${total}`,
-					})
+				onActivity: (activity) => {
+					if (state.cancelling) return
+					state.activity = activity
+					this.updateProgress()
 				},
 			})
 			if ('failed' in result) {
-				const text = `夸克同步${result.cancelled ? '已取消' : '结束'}：完成 ${result.completed}，冲突 ${result.conflicts.length}，跳过 ${result.skipped.length}，失败 ${result.failed.length}`
+				state.result = result
+				state.cancelling = false
+				const text = quarkProgressText(state)
 				this.plugin.statusService.updateSyncStatus({
 					text,
 					showNotice: manual || !!result.failed.length,
@@ -163,6 +210,8 @@ export class QuarkSyncService {
 			}
 			return false
 		} catch (error) {
+			state.error = safeError(error)
+			state.cancelling = false
 			this.plugin.statusService.updateSyncStatus({
 				text: safeError(error),
 				isError: true,
@@ -170,12 +219,18 @@ export class QuarkSyncService {
 			})
 			return false
 		} finally {
+			state.running = false
 			this.controller = undefined
 			this.plugin.toggleSyncUI(false)
+			this.progressModal?.update()
 		}
 	}
 
 	async showStatus() {
+		if (this.controller && this.progressState) {
+			this.showProgress()
+			return
+		}
 		try {
 			const status = await (await vaultSyncContext(this.plugin.app)).status()
 			const modal = new Modal(this.plugin.app)
@@ -183,17 +238,13 @@ export class QuarkSyncService {
 			modal.contentEl.createEl('p', {
 				text: status.locked ? '该知识库正在同步。' : '当前没有同步任务。',
 			})
-			if (this.controller && this.progress)
-				modal.contentEl.createEl('p', {
-					text: `进度：${this.progress.completed}/${this.progress.total}`,
-				})
 			const result = status.status?.result
 			if (result) {
 				modal.contentEl.createEl('p', {
 					text: `上次同步：${result.finishedAt}`,
 				})
 				modal.contentEl.createEl('p', {
-					text: `完成 ${result.completed}，冲突 ${result.conflicts.length}，跳过 ${result.skipped.length}，失败 ${result.failed.length}${result.cancelled ? '，已取消' : ''}`,
+					text: `完成 ${result.completed}，未变化 ${result.unchanged}，冲突 ${result.conflicts.length}，跳过 ${result.skipped.length}，失败 ${result.failed.length}${result.cancelled ? '，已取消' : ''}`,
 				})
 				const list = modal.contentEl.createEl('ul')
 				for (const path of result.conflicts)
@@ -210,6 +261,7 @@ export class QuarkSyncService {
 
 	unload() {
 		this.controller?.abort()
+		this.progressModal?.close()
 		this.loginModal?.close()
 		this.authorizationModal?.close()
 		this.cancelSubscription.unsubscribe()

@@ -8,6 +8,7 @@ import {
 	FileStore,
 	safeError,
 	SyncAction,
+	SyncActivity,
 	SyncConfig,
 	SyncError,
 	SyncPlan,
@@ -23,6 +24,7 @@ export interface EngineOptions {
 	checkpoint: (state: SyncState) => Promise<void>
 	signal?: AbortSignal
 	onProgress?: (completed: number, total: number) => void
+	onActivity?: (activity: SyncActivity) => void
 }
 
 export class SyncEngine {
@@ -30,6 +32,7 @@ export class SyncEngine {
 
 	async preview(): Promise<SyncPlan> {
 		const { local, remote, config, state, signal } = this.options
+		this.options.onActivity?.({ phase: 'scan', completed: 0 })
 		const ignored = exclusionMatcher(config.exclude)
 		const [localEntries, remoteEntries] = await Promise.all([
 			local.list(signal),
@@ -73,9 +76,15 @@ export class SyncEngine {
 			portableNames.set(portable, path)
 		}
 		const plan: SyncPlan = { actions: [], unchanged: 0 }
-		for (const path of [...paths].sort()) {
+		const candidates = [...paths].sort().filter((path) => !ignored(path))
+		for (const [index, path] of candidates.entries()) {
 			checkAbort(signal)
-			if (ignored(path)) continue
+			this.options.onActivity?.({
+				phase: 'compare',
+				completed: index,
+				total: candidates.length,
+				path,
+			})
 			const l = locals.get(path)
 			const r = remotes.get(path)
 			const base = state.files[path]
@@ -209,9 +218,21 @@ export class SyncEngine {
 			cancelled: false,
 		}
 		let processed = 0
+		this.options.onActivity?.({
+			phase: 'sync',
+			completed: 0,
+			total: plan.actions.length,
+		})
 		try {
 			for (const action of plan.actions) {
 				checkAbort(signal)
+				this.options.onActivity?.({
+					phase: 'sync',
+					completed: processed,
+					total: plan.actions.length,
+					path: action.path,
+					action: action.type,
+				})
 				if (action.type === 'conflict') result.conflicts.push(action.path)
 				else if (action.type === 'skip') result.skipped.push(action.path)
 				else {
@@ -286,6 +307,11 @@ export class SyncEngine {
 				}
 				processed++
 				onProgress?.(processed, plan.actions.length)
+				this.options.onActivity?.({
+					phase: 'sync',
+					completed: processed,
+					total: plan.actions.length,
+				})
 				if (processed % 10 === 0) await checkpoint(state)
 			}
 		} catch (error) {
