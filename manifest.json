@@ -1,11 +1,10 @@
 {
-	"id": "alipan-sync",
-	"name": "Alipan Sync",
-	"version": "1.1.11",
+	"id": "csw-vault-sync",
+	"name": "Vault Sync",
+	"version": "1.3.0",
 	"minAppVersion": "1.5.7",
-	"description": "Sync your vault with Alipan (阿里云盘).",
-	"author": "nowszhao",
-	"authorUrl": "https://github.com/nowszhao",
-	"fundingUrl": "https://github.com/nowszhao/obsidian-alipan-sync",
+	"description": "Sync with Quark or Alipan. Quark shares its engine and history with CLI and MCP.",
+	"author": "caishengwei (based on nowszhao)",
+	"authorUrl": "https://github.com/caishengwei/csw-vault-sync",
 	"isDesktopOnly": false
 }

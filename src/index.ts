@@ -24,11 +24,19 @@ import {
 	setPluginInstance,
 	SyncMode,
 } from './settings'
-import { ALIPAN_DEFAULT_CLIENT_ID, ALIPAN_DEFAULT_CLIENT_SECRET } from './settings/alipan-account'
+import {
+	ALIPAN_DEFAULT_CLIENT_ID,
+	ALIPAN_DEFAULT_CLIENT_SECRET,
+} from './settings/alipan-account'
 import { ConflictStrategy } from './sync/tasks/conflict-resolve.task'
 import { GlobMatchOptions } from './utils/glob-match'
 import logger from './utils/logger'
 import { stdRemotePath } from './utils/std-remote-path'
+import { QuarkSyncService } from './services/quark-sync.service'
+import {
+	vaultSyncContext,
+	VaultSyncContext,
+} from './services/vault-sync-context'
 
 export default class AlipanSyncPlugin extends Plugin {
 	public isSyncing: boolean = false
@@ -42,11 +50,17 @@ export default class AlipanSyncPlugin extends Plugin {
 	public ribbonManager = new SyncRibbonManager(this)
 	public statusService = new StatusService(this)
 	public syncExecutorService = new SyncExecutorService(this)
+	public quarkSyncService = new QuarkSyncService(this)
+	private quarkConfigured = false
+	private quarkContext?: VaultSyncContext
 	public realtimeSyncService = new RealtimeSyncService(
 		this,
 		this.syncExecutorService,
 	)
-	public scheduledSyncService = new ScheduledSyncService(this, this.syncExecutorService)
+	public scheduledSyncService = new ScheduledSyncService(
+		this,
+		this.syncExecutorService,
+	)
 
 	/**
 	 * Create a RemoteStorage instance based on current settings.
@@ -56,17 +70,15 @@ export default class AlipanSyncPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings()
+		await this.refreshQuarkConfiguration()
 		this.addSettingTab(new AlipanSettingTab(this.app, this))
 
 		// Register Alipan OAuth callback handler
-		this.registerObsidianProtocolHandler(
-			'alipan-sync/oauth',
-			async (data) => {
-				if (data?.code) {
-					await this.handleAlipanOAuthCallback(data.code)
-				}
-			},
-		)
+		this.registerObsidianProtocolHandler('alipan-sync/oauth', async (data) => {
+			if (data?.code) {
+				await this.handleAlipanOAuthCallback(data.code)
+			}
+		})
 
 		setPluginInstance(this)
 
@@ -87,17 +99,20 @@ export default class AlipanSyncPlugin extends Plugin {
 				return undefined
 			}
 
-			logger.info(`createRemoteStorage: Creating AlipanRemoteStorage, driveId=${alipanSettings.driveId}`)
-
-			const { AlipanRemoteStorage, AlipanClient } = await import(
-				'./remote-storage/alipan'
+			logger.info(
+				`createRemoteStorage: Creating AlipanRemoteStorage, driveId=${alipanSettings.driveId}`,
 			)
+
+			const { AlipanRemoteStorage, AlipanClient } =
+				await import('./remote-storage/alipan')
 			const client = new AlipanClient(
 				{
 					clientId: alipanSettings.clientId || ALIPAN_DEFAULT_CLIENT_ID,
-					clientSecret: alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
+					clientSecret:
+						alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
 					apiBaseUrl: alipanSettings.apiBaseUrl || 'https://openapi.alipan.com',
-					authBaseUrl: alipanSettings.authBaseUrl || 'https://openapi.alipan.com',
+					authBaseUrl:
+						alipanSettings.authBaseUrl || 'https://openapi.alipan.com',
 					driveId: alipanSettings.driveId,
 				},
 				{
@@ -136,6 +151,7 @@ export default class AlipanSyncPlugin extends Plugin {
 		this.eventsService.unload()
 		this.realtimeSyncService.unload()
 		this.statusService.unload()
+		this.quarkSyncService.unload()
 	}
 
 	async loadSettings() {
@@ -148,6 +164,7 @@ export default class AlipanSyncPlugin extends Plugin {
 			} satisfies GlobMatchOptions
 		}
 		const DEFAULT_SETTINGS: AlipanSyncSettings = {
+			provider: 'quark',
 			remoteDir: '',
 			remoteCacheDir: '',
 			useGitStyle: false,
@@ -169,11 +186,13 @@ export default class AlipanSyncPlugin extends Plugin {
 			},
 			realtimeSync: false,
 			startupSyncDelaySeconds: 0,
-			autoSyncIntervalSeconds: 300,
+			autoSyncIntervalSeconds: 0,
 			language: undefined,
 		}
 
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+		const saved = await this.loadData()
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved)
+		if (saved?.alipan && !saved.provider) this.settings.provider = 'alipan'
 	}
 
 	async saveSettings() {
@@ -189,12 +208,22 @@ export default class AlipanSyncPlugin extends Plugin {
 	 * 检查账号配置是否完整
 	 */
 	isAccountConfigured(): boolean {
+		if (this.settings.provider === 'quark') {
+			return this.quarkConfigured || !!this.quarkContext?.hasConfig()
+		}
 		const alipan = this.settings.alipan
-		return !!(
-			alipan?.clientId &&
-			alipan?.refreshToken &&
-			alipan?.driveId
-		)
+		return !!(alipan?.clientId && alipan?.refreshToken && alipan?.driveId)
+	}
+
+	async refreshQuarkConfiguration() {
+		try {
+			this.quarkContext = await vaultSyncContext(this.app)
+			const config = await this.quarkContext.readConfig()
+			await this.quarkContext.readCookie(config)
+			this.quarkConfigured = true
+		} catch {
+			this.quarkConfigured = false
+		}
 	}
 
 	get remoteBaseDir() {
@@ -236,7 +265,8 @@ export default class AlipanSyncPlugin extends Plugin {
 
 			const tokenBody: Record<string, string> = {
 				client_id: clientId,
-				client_secret: alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
+				client_secret:
+					alipanSettings.clientSecret || ALIPAN_DEFAULT_CLIENT_SECRET,
 				grant_type: 'authorization_code',
 				code,
 			}
@@ -260,7 +290,8 @@ export default class AlipanSyncPlugin extends Plugin {
 			const fallbackDriveId = String(data.default_drive_id || '')
 
 			try {
-				const apiBase = alipanSettings.apiBaseUrl || 'https://openapi.alipan.com'
+				const apiBase =
+					alipanSettings.apiBaseUrl || 'https://openapi.alipan.com'
 				const driveInfoResp = await requestUrl({
 					url: `${apiBase}/adrive/v1.0/user/getDriveInfo`,
 					method: 'POST',
@@ -272,7 +303,9 @@ export default class AlipanSyncPlugin extends Plugin {
 				})
 				const driveInfo = JSON.parse(driveInfoResp.text)
 				resourceDriveId = String(driveInfo.resource_drive_id || '')
-				backupDriveId = String(driveInfo.backup_drive_id || driveInfo.default_drive_id || '')
+				backupDriveId = String(
+					driveInfo.backup_drive_id || driveInfo.default_drive_id || '',
+				)
 			} catch (driveErr) {
 				console.error('Failed to get drive info:', driveErr)
 				if (!backupDriveId && fallbackDriveId) {
@@ -288,7 +321,12 @@ export default class AlipanSyncPlugin extends Plugin {
 			} else if (driveType === 'backup' && backupDriveId) {
 				driveId = backupDriveId
 			} else {
-				driveId = resourceDriveId || backupDriveId || fallbackDriveId || alipanSettings.driveId || ''
+				driveId =
+					resourceDriveId ||
+					backupDriveId ||
+					fallbackDriveId ||
+					alipanSettings.driveId ||
+					''
 			}
 
 			// Save tokens to settings
@@ -304,9 +342,10 @@ export default class AlipanSyncPlugin extends Plugin {
 				driveType,
 				userId: data.user_id,
 				userName: data.user_name,
-				pathResolverCache: alipanSettings.driveId === driveId
-					? alipanSettings.pathResolverCache
-					: undefined,
+				pathResolverCache:
+					alipanSettings.driveId === driveId
+						? alipanSettings.pathResolverCache
+						: undefined,
 			}
 			await this.saveSettings()
 

@@ -66,8 +66,17 @@ export default class CommandService {
 			id: 'show-sync-progress',
 			name: i18n.t('sync.showProgressButton'),
 			callback: () => {
+				if (plugin.settings.provider === 'quark') {
+					void plugin.quarkSyncService.showStatus()
+					return
+				}
 				plugin.progressService.showProgressModal()
 			},
+		})
+		plugin.addCommand({
+			id: 'preview-quark-sync',
+			name: '预览夸克同步',
+			callback: () => plugin.quarkSyncService.preview(),
 		})
 	}
 }

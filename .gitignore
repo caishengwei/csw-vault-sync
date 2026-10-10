@@ -25,3 +25,6 @@ data.json
 dist
 styles.css
 main.js
+
+.vault-sync/
+packages/remote-explorer/node_modules/

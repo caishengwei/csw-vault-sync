@@ -27,6 +27,7 @@ vi.mock('~/utils/logger', () => ({
 // Mock ~/utils/has-invalid-char
 vi.mock('~/utils/has-invalid-char', () => ({
 	hasInvalidChar: () => false,
+	hasFilenameError: () => false,
 }))
 
 // Mock task-related modules that import heavy dependencies

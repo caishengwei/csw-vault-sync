@@ -10,6 +10,7 @@ import CacheSettings from './cache'
 import CommonSettings from './common'
 import FilterSettings from './filter'
 import LogSettings from './log'
+import QuarkAccountSettings from './quark-account'
 
 export enum SyncMode {
 	STRICT = 'strict',
@@ -53,6 +54,7 @@ export interface AlipanSettings {
 }
 
 export interface AlipanSyncSettings {
+	provider?: 'alipan' | 'quark'
 	remoteDir: string
 	remoteCacheDir?: string
 	useGitStyle: boolean
@@ -74,7 +76,6 @@ export interface AlipanSyncSettings {
 	/** Alipan (阿里云盘) configuration */
 	alipan?: AlipanSettings
 }
-
 
 let pluginInstance: AlipanSyncPlugin | null = null
 
@@ -99,6 +100,8 @@ export class AlipanSettingTab extends PluginSettingTab {
 	logSettings: LogSettings
 	cacheSettings: CacheSettings
 	warningContainerEl: HTMLElement
+	providerContainerEl: HTMLElement
+	quarkAccountSettings: QuarkAccountSettings
 
 	subSso = onSsoReceive().subscribe(() => {
 		this.display()
@@ -108,6 +111,13 @@ export class AlipanSettingTab extends PluginSettingTab {
 		super(app, plugin)
 		this.plugin = plugin
 		this.warningContainerEl = this.containerEl.createDiv()
+		this.providerContainerEl = this.containerEl.createDiv()
+		this.quarkAccountSettings = new QuarkAccountSettings(
+			this.app,
+			this.plugin,
+			this,
+			this.containerEl.createDiv(),
+		)
 		this.alipanAccountSettings = new AlipanAccountSettings(
 			this.app,
 			this.plugin,
@@ -142,10 +152,42 @@ export class AlipanSettingTab extends PluginSettingTab {
 
 	async display() {
 		this.warningContainerEl.empty()
+		this.providerContainerEl.empty()
+		new Setting(this.providerContainerEl)
+			.setName('同步网盘')
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption('quark', '夸克网盘')
+					.addOption('alipan', '阿里云盘')
+					.setValue(this.plugin.settings.provider || 'alipan')
+					.onChange(async (value: 'quark' | 'alipan') => {
+						if (this.plugin.isSyncing) {
+							await this.display()
+							return
+						}
+						this.plugin.settings.provider = value
+						await this.plugin.saveSettings()
+						await this.plugin.refreshQuarkConfiguration()
+						await this.display()
+					}),
+			)
 		new Setting(this.warningContainerEl)
 			.setName(i18n.t('settings.backupWarning.name'))
 			.setDesc(i18n.t('settings.backupWarning.desc'))
 
+		if (this.plugin.settings.provider === 'quark') {
+			for (const section of [
+				this.alipanAccountSettings,
+				this.commonSettings,
+				this.filterSettings,
+				this.cacheSettings,
+				this.logSettings,
+			])
+				section.containerEl.empty()
+			await this.quarkAccountSettings.display()
+			return
+		}
+		this.quarkAccountSettings.containerEl.empty()
 		await this.alipanAccountSettings.display()
 		await this.commonSettings.display()
 		await this.filterSettings.display()
@@ -157,4 +199,3 @@ export class AlipanSettingTab extends PluginSettingTab {
 		// No cleanup needed for Alipan settings
 	}
 }
-

@@ -54,6 +54,7 @@ const context = await esbuild.context({
 	entryPoints: ['src/index.ts'],
 	bundle: true,
 	external: [
+		'node:*',
 		'obsidian',
 		'electron',
 		'@codemirror/autocomplete',
@@ -91,7 +92,7 @@ const context = await esbuild.context({
 
 if (prod) {
 	await context.rebuild()
-	process.exit(0)
+	await context.dispose()
 } else {
 	await context.watch()
 }
